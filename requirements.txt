@@ -1,0 +1,5 @@
+flask
+requests
+faiss-cpu
+sentence-transformers
+werkzeug
