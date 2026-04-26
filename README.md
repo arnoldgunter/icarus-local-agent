@@ -1,5 +1,7 @@
 # 🧠 Icarus Local AI Agent
 
+![Screenshot](screenshot.png)
+
 **Icarus** is a self-hosted local AI assistant powered by Ollama.  
 It runs on your own machine, provides a responsive web chat UI, supports uploads, structured memory, vector memory, read-only file tools, and human-approved terminal commands.
 
@@ -550,9 +552,7 @@ It is best used as:
 
 ## 📄 License
 
-MIT License recommended.
-
-Replace this section with your chosen license before publishing.
+[MIT](LICENSE.md)
 
 ---
 
