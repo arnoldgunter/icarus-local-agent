@@ -21,6 +21,8 @@ It runs on your own machine, provides a responsive web chat UI, supports uploads
 - 🖼️ **Image metadata + optional OCR support**
 - 📊 **CSV and JSON reading tools**
 - 📁 **Read-only directory/file inspection**
+- 🌐 **Web fetching** with `fetch_url` (simple HTML to text)
+- 🔍 **Web search and scraping** with Firecrawl API
 - 🧑‍⚖️ **Human-in-the-loop terminal approval**
 - ⏱️ **Response time display**
 - 🔢 **Token usage display**
@@ -123,6 +125,7 @@ Final answer shown in chat
 - Ollama installed and running
 - At least one local Ollama model
 - Linux/macOS recommended
+- (Optional) Firecrawl API key for web search and scraping
 
 Recommended models:
 
@@ -163,6 +166,16 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+(Optional) Set up environment variables for Firecrawl:
+
+Create a `.env` file in the project root:
+
+```bash
+FIRECRAWL_API_KEY=your_api_key_here
+```
+
+Get a free Firecrawl API key at [firecrawl.dev](https://firecrawl.dev). Without this key, web search and scraping features will not work.
+
 Start Ollama:
 
 ```bash
@@ -189,17 +202,28 @@ http://YOUR_LOCAL_IP:5000
 
 ---
 
-## 📦 Example `requirements.txt`
+## 📦 Dependencies
+
+Current `requirements.txt`:
 
 ```txt
 flask
 requests
 faiss-cpu
 sentence-transformers
-pypdf
-python-docx
-pillow
-pytesseract
+werkzeug
+beautifulsoup4
+python-dotenv
+lxml
+```
+
+Additional optional dependencies for extended features:
+
+```txt
+pypdf          # PDF reading
+python-docx    # Word document reading
+pillow         # Image handling
+pytesseract    # OCR support
 ```
 
 OCR requires the system package `tesseract-ocr`.
@@ -266,18 +290,18 @@ Uploaded files are stored locally in:
 
 The chat UI sends uploaded file metadata to the model so it can request the correct tool.
 
-Supported tools include:
+Supported file inspection tools:
 
-- `read_pdf`
-- `read_docx`
-- `read_image`
-- `read_csv`
-- `read_json`
-- `read_text_file`
-- `list_directory`
-- `file_info`
-- `search_text`
-- `hash_file`
+- `read_pdf` - Extract text from PDF files
+- `read_docx` - Extract text from Word documents
+- `read_image_metadata` - Get image metadata (visual analysis via Ollama)
+- `read_csv` - Read CSV files with preview
+- `read_json` - Read JSON files
+- `read_text_file` - Read text-based files
+- `list_directory` - List directory contents
+- `file_info` - Get file metadata
+- `search_text` - Search within text files
+- `hash_file` - Calculate file checksums
 
 ---
 
@@ -285,7 +309,38 @@ Supported tools include:
 
 For file inspection, Icarus should prefer dedicated Python tools over shell commands.
 
-Example tool request:
+### Available Tools
+
+#### File & Directory Tools
+
+- **`file_info`**: Return metadata for a file or directory
+- **`list_directory`**: List files and folders inside a directory (with optional recursive mode)
+- **`read_text_file`**: Read plain text, markdown, code, logs and similar text files
+- **`search_text`**: Search for a string or regex pattern inside a text-readable file
+- **`hash_file`**: Calculate sha256 hash of a file
+
+#### Document Reading Tools
+
+- **`read_pdf`**: Extract text from a PDF file with metadata
+- **`read_docx`**: Extract text and tables from a Word `.docx` document
+- **`read_csv`**: Read a CSV file with preview and basic stats
+- **`read_json`**: Read and parse a JSON file
+
+#### Image & Media Tools
+
+- **`read_image_metadata`**: Return image metadata. Visual understanding is handled by sending images directly to Ollama.
+
+#### Web Tools
+
+- **`fetch_url`**: Fetch and extract readable text from a webpage using BeautifulSoup
+- **`firecrawl_search`**: Search the web with Firecrawl and optionally scrape markdown content from results
+  - Args: `query` (required), `limit` (optional, default 3, max 10), `scrape` (optional, default true)
+  - Requires: FIRECRAWL_API_KEY environment variable
+- **`firecrawl_fetch_url`**: Fetch a single webpage with Firecrawl and return clean markdown
+  - Args: `url` (required, must start with http:// or https://)
+  - Requires: FIRECRAWL_API_KEY environment variable
+
+### Tool Request Example
 
 ```json
 {
