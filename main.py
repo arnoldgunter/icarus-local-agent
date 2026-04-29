@@ -65,6 +65,11 @@ Important file rule:
 - Prefer tools over shell.
 - Never claim you read a file unless it was provided as image input, tool output, or approved command output.
 
+If the user asks to search the web, look something up online, fetch a website, or summarize a webpage:
+- Use firecrawl_search for search queries.
+- Use firecrawl_fetch_url or fetch_url for a specific URL.
+- Do not use shell commands like wget or curl for web access.
+
 Allowed read roots:
 {json.dumps([str(p) for p in ALLOWED_ROOTS], indent=2)}
 
@@ -393,6 +398,8 @@ def normalize_tool_request(obj):
         return obj
 
     known_tools = {
+        "firecrawl_search",
+        "firecrawl_fetch_url",
         "fetch_url",
         "read_pdf",
         "read_docx",

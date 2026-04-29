@@ -7,6 +7,11 @@ from pathlib import Path
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+load_dotenv()
+
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
 
 ALLOWED_ROOTS = [
     Path.home().resolve(),
@@ -167,7 +172,21 @@ def list_available_tools():
         "fetch_url": {
             "description": "Fetch and extract readable text from a webpage.",
             "args": {"url": "https://example.com"}
-}
+        },
+        "firecrawl_search": {
+            "description": "Search the web with Firecrawl and optionally scrape markdown content from results.",
+            "args": {
+                "query": "search query",
+                "limit": "optional number, default 3",
+                "scrape": "optional bool, default true"
+            }
+        },
+        "firecrawl_fetch_url": {
+            "description": "Fetch a single webpage with Firecrawl and return clean markdown.",
+            "args": {
+                "url": "https://example.com"
+            }
+        }
     }
 
 
@@ -208,6 +227,12 @@ def run_tool(tool_name, args):
         
         if tool_name == "fetch_url":
             return tool_fetch_url(args)
+        
+        if tool_name == "firecrawl_search":
+            return tool_firecrawl_search(args)
+
+        if tool_name == "firecrawl_fetch_url":
+            return tool_firecrawl_fetch_url(args)
 
         return {
             "ok": False,
@@ -634,4 +659,91 @@ def tool_fetch_url(args):
         "title": title,
         "content": clean_text[:60_000],
         "truncated": len(clean_text) > 60_000
+    }
+    
+def require_firecrawl_key():
+    if not FIRECRAWL_API_KEY:
+        raise ValueError("Missing FIRECRAWL_API_KEY in environment.")
+    return FIRECRAWL_API_KEY
+
+
+def tool_firecrawl_search(args):
+    api_key = require_firecrawl_key()
+
+    query = args.get("query")
+    limit = int(args.get("limit", 3))
+    scrape = bool(args.get("scrape", True))
+
+    if not query:
+        raise ValueError("Missing query.")
+
+    limit = max(1, min(limit, 10))
+
+    payload = {
+        "query": query,
+        "limit": limit
+    }
+
+    if scrape:
+        payload["scrapeOptions"] = {
+            "formats": ["markdown", "links"]
+        }
+
+    r = requests.post(
+        "https://api.firecrawl.dev/v2/search",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=45
+    )
+
+    r.raise_for_status()
+    data = r.json()
+
+    return {
+        "ok": True,
+        "tool": "firecrawl_search",
+        "query": query,
+        "limit": limit,
+        "scrape": scrape,
+        "result": data
+    }
+
+
+def tool_firecrawl_fetch_url(args):
+    api_key = require_firecrawl_key()
+
+    url = args.get("url")
+
+    if not url:
+        raise ValueError("Missing url.")
+
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("Invalid URL.")
+
+    payload = {
+        "url": url,
+        "formats": ["markdown", "links"]
+    }
+
+    r = requests.post(
+        "https://api.firecrawl.dev/v2/scrape",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=45
+    )
+
+    r.raise_for_status()
+    data = r.json()
+
+    return {
+        "ok": True,
+        "tool": "firecrawl_fetch_url",
+        "url": url,
+        "result": data
     }
