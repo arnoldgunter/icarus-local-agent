@@ -3,3 +3,5 @@ requests
 faiss-cpu
 sentence-transformers
 werkzeug
+requests
+beautifulsoup4
