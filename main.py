@@ -385,6 +385,39 @@ def collect_uploaded_images(uploaded_files):
 
     return images, image_files, other_files
 
+def normalize_tool_request(obj):
+    if not isinstance(obj, dict):
+        return obj
+
+    if obj.get("type") == "tool_request":
+        return obj
+
+    known_tools = {
+        "fetch_url",
+        "read_pdf",
+        "read_docx",
+        "read_text_file",
+        "read_csv",
+        "read_json",
+        "read_image_metadata",
+        "list_directory",
+        "file_info",
+        "search_text",
+        "hash_file"
+    }
+
+    if obj.get("type") in known_tools:
+        tool = obj.get("type")
+        args = {k: v for k, v in obj.items() if k != "type"}
+
+        return {
+            "type": "tool_request",
+            "tool": tool,
+            "args": args
+        }
+
+    return obj
+
 
 def chat_ollama(model, messages):
     global current_model
@@ -713,7 +746,6 @@ def continue_after_tool(model, messages, tool_request, tool_result):
 
     return chat_ollama(model, messages)
 
-
 # ==============================
 # ROUTES
 # ==============================
@@ -750,6 +782,7 @@ def chat():
     try:
         response = chat_ollama(model, messages)
         request_obj = try_parse_json_object(response["content"])
+        request_obj = normalize_tool_request(request_obj)
 
         if request_obj and request_obj.get("type") == "tool_request":
             tool_name = request_obj.get("tool")
