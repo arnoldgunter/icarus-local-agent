@@ -205,6 +205,9 @@ def run_tool(tool_name, args):
 
         if tool_name == "hash_file":
             return tool_hash_file(args)
+        
+        if tool_name == "fetch_url":
+            return tool_fetch_url(args)
 
         return {
             "ok": False,
