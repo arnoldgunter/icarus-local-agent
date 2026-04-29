@@ -22,6 +22,10 @@ from tools import (
 )
 
 
+# ==============================
+# CONFIG
+# ==============================
+
 OLLAMA_URL = "http://localhost:11434"
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -40,6 +44,8 @@ EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
 current_model = None
 PENDING_COMMANDS = {}
+CONVERSATIONS = {}
+MAX_HISTORY_MESSAGES = 24
 
 SYSTEM_PROMPT = f"""
 You are Icarus, a locally running AI assistant.
@@ -47,12 +53,15 @@ You are Icarus, a locally running AI assistant.
 You run on the user's workstation.
 Use markdown fully.
 
+Important conversation rule:
+- You receive the recent chat history.
+- Use it to answer follow-up questions like "why", "continue", "what do you mean", etc.
+- Do not ask for context if the previous messages already contain it.
+
 Important file rule:
 - If uploaded images are provided in the message images field, inspect them directly.
 - Do not guess image contents from filenames.
 - For PDFs, Word files, CSV, JSON and text files, request tools.
-- If you need to read a webpage: Use the fetch_url tool
-- Do NOT use shell commands like wget or curl
 - Prefer tools over shell.
 - Never claim you read a file unless it was provided as image input, tool output, or approved command output.
 
@@ -86,10 +95,55 @@ Rules:
 """
 
 
+# ==============================
+# FLASK
+# ==============================
+
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_DIR)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 
+
+# ==============================
+# CHAT HISTORY
+# ==============================
+
+def get_chat_history(chat_id):
+    if not chat_id:
+        chat_id = "default"
+
+    if chat_id not in CONVERSATIONS:
+        CONVERSATIONS[chat_id] = []
+
+    return CONVERSATIONS[chat_id]
+
+
+def trim_history(history):
+    if len(history) > MAX_HISTORY_MESSAGES:
+        del history[:-MAX_HISTORY_MESSAGES]
+
+
+def append_history(chat_id, role, content):
+    if not content:
+        return
+
+    history = get_chat_history(chat_id)
+    history.append({
+        "role": role,
+        "content": content
+    })
+    trim_history(history)
+
+
+def clear_chat_history(chat_id):
+    if not chat_id:
+        chat_id = "default"
+    CONVERSATIONS[chat_id] = []
+
+
+# ==============================
+# PROFILE MEMORY
+# ==============================
 
 def default_profile():
     return {
@@ -160,6 +214,10 @@ def update_profile_from_user_text(user_text):
     save_profile(profile)
     return profile
 
+
+# ==============================
+# VECTOR MEMORY
+# ==============================
 
 def load_vector_memory():
     if os.path.exists(INDEX_FILE):
@@ -265,6 +323,10 @@ User message:
         return []
 
 
+# ==============================
+# OLLAMA
+# ==============================
+
 def get_models():
     try:
         r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=10)
@@ -363,6 +425,10 @@ def chat_ollama(model, messages):
     }
 
 
+# ==============================
+# JSON PARSING
+# ==============================
+
 def try_parse_json_object(text):
     text = text.strip()
 
@@ -386,6 +452,10 @@ def try_parse_json_object(text):
 
     return None
 
+
+# ==============================
+# COMMAND APPROVAL
+# ==============================
 
 BLOCKED_PATTERNS = [
     "rm ",
@@ -555,7 +625,11 @@ def run_command(command):
         }
 
 
-def build_messages(user, uploaded_files=None):
+# ==============================
+# MESSAGE BUILDING
+# ==============================
+
+def build_messages(user, uploaded_files=None, chat_id="default"):
     profile = update_profile_from_user_text(user)
     profile_block = json.dumps(profile, ensure_ascii=False, indent=2)
 
@@ -564,6 +638,7 @@ def build_messages(user, uploaded_files=None):
 
     uploaded_files = uploaded_files or []
     images, image_files, other_files = collect_uploaded_images(uploaded_files)
+    history = get_chat_history(chat_id)
 
     context = {
         "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -573,7 +648,8 @@ def build_messages(user, uploaded_files=None):
         "upload_dir": str(UPLOAD_DIR),
         "uploaded_files": uploaded_files,
         "image_files_sent_directly_to_model": image_files,
-        "non_image_files_available_for_tools": other_files
+        "non_image_files_available_for_tools": other_files,
+        "history_messages_available": len(history)
     }
 
     user_content = user
@@ -613,6 +689,7 @@ def build_messages(user, uploaded_files=None):
                 + json.dumps(context, ensure_ascii=False, indent=2)
             )
         },
+        *history,
         user_message
     ]
 
@@ -637,6 +714,10 @@ def continue_after_tool(model, messages, tool_request, tool_result):
     return chat_ollama(model, messages)
 
 
+# ==============================
+# ROUTES
+# ==============================
+
 @app.route("/")
 def index():
     models = get_models()
@@ -649,6 +730,7 @@ def chat():
 
     user = data.get("message", "").strip()
     model = data.get("model", "").strip()
+    chat_id = data.get("chat_id") or "default"
 
     uploaded_files = data.get("uploaded_files")
     if uploaded_files is None:
@@ -663,7 +745,7 @@ def chat():
     if not user:
         user = "Bitte analysiere die hochgeladenen Dateien."
 
-    messages, profile_block, memory_block = build_messages(user, uploaded_files)
+    messages, profile_block, memory_block = build_messages(user, uploaded_files, chat_id)
 
     try:
         response = chat_ollama(model, messages)
@@ -675,6 +757,9 @@ def chat():
 
             tool_result = run_tool(tool_name, args)
             final_response = continue_after_tool(model, messages, request_obj, tool_result)
+
+            append_history(chat_id, "user", user)
+            append_history(chat_id, "assistant", final_response["content"])
 
             return jsonify({
                 "response": final_response["content"],
@@ -700,7 +785,8 @@ def chat():
                 "original_user_message": user,
                 "profile_block": profile_block,
                 "memory_block": memory_block,
-                "uploaded_files": uploaded_files
+                "uploaded_files": uploaded_files,
+                "chat_id": chat_id
             }
 
             return jsonify({
@@ -719,6 +805,9 @@ def chat():
         new_facts = extract_memory(model, user)
         for fact in new_facts:
             add_memory(fact)
+
+        append_history(chat_id, "user", user)
+        append_history(chat_id, "assistant", response["content"])
 
         return jsonify({
             "response": response["content"],
@@ -746,6 +835,7 @@ def approve_command():
     command_id = data.get("command_id")
     approved = data.get("approved") is True
     model = data.get("model", "").strip()
+    request_chat_id = data.get("chat_id") or "default"
 
     pending = PENDING_COMMANDS.pop(command_id, None)
 
@@ -756,8 +846,12 @@ def approve_command():
         return jsonify({"response": "Fehler: Kein Modell ausgewählt."}), 400
 
     command = pending["command"]
+    chat_id = pending.get("chat_id") or request_chat_id
 
     if not approved:
+        append_history(chat_id, "user", pending["original_user_message"])
+        append_history(chat_id, "assistant", f"Ausführung abgelehnt.\n\n```bash\n{command}\n```")
+
         return jsonify({
             "response": f"Ausführung abgelehnt.\n\n```bash\n{command}\n```"
         })
@@ -766,7 +860,8 @@ def approve_command():
 
     messages, _, _ = build_messages(
         pending["original_user_message"],
-        pending.get("uploaded_files", [])
+        pending.get("uploaded_files", []),
+        chat_id
     )
 
     messages.append({
@@ -789,6 +884,10 @@ def approve_command():
 
     try:
         response = chat_ollama(model, messages)
+
+        append_history(chat_id, "user", pending["original_user_message"])
+        append_history(chat_id, "assistant", response["content"])
+
         return jsonify({
             "response": response["content"],
             "prompt_tokens": response["prompt_tokens"],
@@ -825,6 +924,27 @@ def upload_file():
         "path": str(target),
         "size_bytes": target.stat().st_size,
         "is_image": is_image_file(str(target))
+    })
+
+
+@app.route("/history", methods=["GET"])
+def history_debug():
+    chat_id = request.args.get("chat_id") or "default"
+    return jsonify({
+        "chat_id": chat_id,
+        "history_count": len(get_chat_history(chat_id)),
+        "history": get_chat_history(chat_id)
+    })
+
+
+@app.route("/history", methods=["DELETE"])
+def history_clear():
+    data = request.json or {}
+    chat_id = data.get("chat_id") or request.args.get("chat_id") or "default"
+    clear_chat_history(chat_id)
+    return jsonify({
+        "response": "Chat-Verlauf gelöscht.",
+        "chat_id": chat_id
     })
 
 

@@ -44,7 +44,14 @@
     const sendBtn = document.getElementById("sendBtn");
     const fileInput = document.getElementById("fileInput");
     const attachments = document.getElementById("attachments");
+
     let pendingUploads = [];
+
+    let chatId = localStorage.getItem("icarus_chat_id");
+    if (!chatId) {
+      chatId = crypto.randomUUID();
+      localStorage.setItem("icarus_chat_id", chatId);
+    }
 
     function autoResize() {
       input.style.height = "auto";
@@ -71,24 +78,32 @@
     async function uploadFile(file) {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/upload", { method: "POST", body: formData });
+
+      const res = await fetch("/upload", {
+        method: "POST",
+        body: formData
+      });
+
       const data = await res.json();
+
       if (!res.ok) {
         addMessage("ai", `Upload fehlgeschlagen: ${data.error || "Unbekannter Fehler"}`);
         return;
       }
+
       pendingUploads.push(data);
     }
 
     function renderAttachments() {
       attachments.innerHTML = "";
       attachments.hidden = pendingUploads.length === 0;
+
       for (const file of pendingUploads) {
         const chip = document.createElement("div");
         chip.className = "attachment-chip";
         chip.innerHTML = `
-          <span>${escapeHtml(file.original_name)}</span>
-          <small>${Math.round(file.size_bytes / 1024)} KB</small>
+          <span>${escapeHtml(file.original_name || file.filename || file.stored_name)}</span>
+          <small>${Math.round((file.size_bytes || 0) / 1024)} KB</small>
           <button type="button" onclick="removeAttachment('${file.stored_name}')">×</button>
         `;
         attachments.appendChild(chip);
@@ -116,8 +131,12 @@
 
       const content = document.createElement("div");
       content.className = "message-content";
+
       if (sender === "ai") {
-        content.innerHTML = marked.parse(text || "", { breaks: true, gfm: true });
+        content.innerHTML = marked.parse(text || "", {
+          breaks: true,
+          gfm: true
+        });
       } else {
         content.textContent = text || "";
       }
@@ -143,31 +162,43 @@
 
     async function send(event) {
       if (event) event.preventDefault();
+
       const text = input.value.trim();
       const files = [...pendingUploads];
+
       if (!text && files.length === 0) return;
 
       const model = document.getElementById("model").value;
+
       let shown = text;
       if (files.length) {
-        shown += `\n\nUploads:\n` + files.map(f => `- ${f.original_name}`).join("\n");
+        shown += `\n\nUploads:\n` + files.map(f => `- ${f.original_name || f.filename || f.stored_name}`).join("\n");
       }
+
       addMessage("user", shown);
 
       input.value = "";
       pendingUploads = [];
       renderAttachments();
       autoResize();
+
       sendBtn.disabled = true;
       sendBtn.textContent = "…";
 
       const started = performance.now();
+
       try {
         const res = await fetch("/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, model, files })
+          body: JSON.stringify({
+            message: text,
+            model,
+            uploaded_files: files,
+            chat_id: chatId
+          })
         });
+
         const data = await res.json();
         const client_ms = performance.now() - started;
 
@@ -194,7 +225,11 @@
     function addCommandApproval(data) {
       const article = document.createElement("article");
       article.className = "message ai command-request";
-      const validation = data.valid ? "Validiert: read-only erlaubt" : `Blockiert: ${data.validation_reason}`;
+
+      const validation = data.valid
+        ? "Validiert: read-only erlaubt"
+        : `Blockiert: ${data.validation_reason}`;
+
       article.innerHTML = `
         <div class="message-label">Terminal approval</div>
         <div class="message-content">
@@ -207,6 +242,7 @@
           </div>
         </div>
       `;
+
       chat.appendChild(article);
       chat.scrollTop = chat.scrollHeight;
     }
@@ -214,13 +250,21 @@
     async function approveCommand(commandId, approved) {
       const model = document.getElementById("model").value;
       const started = performance.now();
+
       const res = await fetch("/approve-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command_id: commandId, approved, model })
+        body: JSON.stringify({
+          command_id: commandId,
+          approved,
+          model,
+          chat_id: chatId
+        })
       });
+
       const data = await res.json();
       const client_ms = performance.now() - started;
+
       addMessage("ai", data.response, {
         client_ms,
         prompt_tokens: data.prompt_tokens,
@@ -229,9 +273,26 @@
       });
     }
 
+    async function clearChatHistory() {
+      await fetch("/history", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId })
+      });
+
+      chat.innerHTML = "";
+      addMessage("ai", "Chat-Verlauf wurde gelöscht.");
+    }
+
     function escapeHtml(str) {
       return String(str).replace(/[&<>"']/g, function(match) {
-        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[match];
+        return {
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#039;"
+        }[match];
       });
     }
   </script>
