@@ -756,6 +756,10 @@ def chat():
             args = request_obj.get("args", {})
 
             tool_result = run_tool(tool_name, args)
+            
+            print("TOOL CALL:", tool_name, args)
+            print("TOOL RESULT:", tool_result)
+            
             final_response = continue_after_tool(model, messages, request_obj, tool_result)
 
             append_history(chat_id, "user", user)
