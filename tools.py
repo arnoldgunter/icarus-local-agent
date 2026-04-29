@@ -577,38 +577,61 @@ def tool_fetch_url(args):
     if not url:
         raise ValueError("Missing url")
 
-    if not url.startswith("http"):
+    if not url.startswith(("http://", "https://")):
         raise ValueError("Invalid URL")
-    
 
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
+    headers = {
+        "User-Agent": (
+            "IcarusLocalAgent/0.1 "
+            "(local personal assistant; contact: local)"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9,en;q=0.8"
+    }
 
-        if "text/html" not in r.headers.get("content-type", ""):
-            raise ValueError("Only HTML allowed")
-        
-        html = r.text[:200_000]  # hard limit
+    r = requests.get(
+        url,
+        headers=headers,
+        timeout=15,
+        allow_redirects=True
+    )
 
-        soup = BeautifulSoup(html, "html.parser")
+    r.raise_for_status()
 
-        # Remove scripts/styles
-        for tag in soup(["script", "style", "noscript"]):
-            tag.decompose()
+    content_type = r.headers.get("content-type", "").lower()
 
-        text = soup.get_text(separator="\n")
-
-        return {
-            "ok": True,
-            "tool": "fetch_url",
-            "url": url,
-            "status_code": r.status_code,
-            "content": text[:50_000]
-        }
-
-    except Exception as e:
+    if "text/html" not in content_type:
         return {
             "ok": False,
             "tool": "fetch_url",
-            "error": str(e)
+            "url": url,
+            "status_code": r.status_code,
+            "content_type": content_type,
+            "error": "Only HTML pages are supported by fetch_url."
         }
+
+    html = r.text[:300_000]
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    for tag in soup(["script", "style", "noscript", "svg", "canvas"]):
+        tag.decompose()
+
+    title = soup.title.get_text(" ", strip=True) if soup.title else ""
+
+    text = soup.get_text(separator="\n")
+    lines = [line.strip() for line in text.splitlines()]
+    lines = [line for line in lines if line]
+
+    clean_text = "\n".join(lines)
+
+    return {
+        "ok": True,
+        "tool": "fetch_url",
+        "url": url,
+        "status_code": r.status_code,
+        "content_type": content_type,
+        "title": title,
+        "content": clean_text[:60_000],
+        "truncated": len(clean_text) > 60_000
+    }
