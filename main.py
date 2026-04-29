@@ -51,6 +51,8 @@ Important file rule:
 - If uploaded images are provided in the message images field, inspect them directly.
 - Do not guess image contents from filenames.
 - For PDFs, Word files, CSV, JSON and text files, request tools.
+- If you need to read a webpage: Use the fetch_url tool
+- Do NOT use shell commands like wget or curl
 - Prefer tools over shell.
 - Never claim you read a file unless it was provided as image input, tool output, or approved command output.
 

@@ -5,6 +5,8 @@ import mimetypes
 import hashlib
 from pathlib import Path
 from datetime import datetime
+import requests
+from bs4 import BeautifulSoup
 
 ALLOWED_ROOTS = [
     Path.home().resolve(),
@@ -161,7 +163,11 @@ def list_available_tools():
         "hash_file": {
             "description": "Calculate sha256 hash of a file.",
             "args": {"path": "absolute path"}
-        }
+        },
+        "fetch_url": {
+            "description": "Fetch and extract readable text from a webpage.",
+            "args": {"url": "https://example.com"}
+}
     }
 
 
@@ -561,3 +567,45 @@ def tool_hash_file(args):
         "file": basic_file_info(str(resolved)),
         "sha256": sha256.hexdigest()
     }
+
+def tool_fetch_url(args):
+    url = args.get("url")
+
+    if not url:
+        raise ValueError("Missing url")
+
+    if not url.startswith("http"):
+        raise ValueError("Invalid URL")
+    
+
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+
+        if "text/html" not in r.headers.get("content-type", ""):
+            raise ValueError("Only HTML allowed")
+        
+        html = r.text[:200_000]  # hard limit
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Remove scripts/styles
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        text = soup.get_text(separator="\n")
+
+        return {
+            "ok": True,
+            "tool": "fetch_url",
+            "url": url,
+            "status_code": r.status_code,
+            "content": text[:50_000]
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "tool": "fetch_url",
+            "error": str(e)
+        }
